@@ -1,0 +1,244 @@
+---
+title: "RNA-seq analysis of WT and cbf11 mutant in YES and YES+ammonium"
+author: "Martin Převorovský, prevorov@natur.cuni.cz, http://www.GenoMik.cz"
+output: html_document
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+
+genome_dir <- './genome/'
+bam_dir <- './BAM_RNA-seq/'
+coverage_dir <- './coverage_RNA-seq/'
+QC_dir <- './QC_RNA-seq/'
+QC_trim_dir <- './QC_trim_RNA-seq/'
+image_dir <- './images/'
+```
+
+Variables for shell scripts are stored in the file "shell_variables_RNA-seq.sh" and can be modified as needed:
+
+```{bash list_variables}
+cat shell_variables_RNA-seq.sh
+```
+
+# Getting the raw RNA-seq read datasets
+
+THIS SECTION WILL ONLY BECOME RELEVANT ONCE THE SEQUENCING DATA ARE PUBLIC in ARRAYEXPRESS
+
+All data and metadata can be obtained from ArrayExpress at https://www.ebi.ac.uk/arrayexpress/experiments/XXXXXXXX/.
+
+```{bash, eval=FALSE, message=FALSE}
+source shell_variables_RNA-seq.sh
+
+wget -N --no-verbose https://www.ebi.ac.uk/arrayexpress/files/XXXXXXXX/XXXXXXXX.sdrf.txt
+mapfile -t ftp_links < <(tail -n +2 XXXXXXXX.sdrf.txt | cut -f30)
+mapfile -t ftp_names < <(tail -n +2 XXXXXXXX.sdrf.txt | cut -f28)
+
+mkdir -p "${fastq_dir}"
+for i in ${!ftp_links[@]};
+do
+  wget --no-verbose -O "${fastq_dir}${ftp_names[${i}]}" "${ftp_links[${i}]}"
+done
+```
+
+# *Schizosaccharomyces pombe* genome sequence and annotation
+
+* genome was downloaded from ftp://ftp.pombase.org/pombe/genome_sequence_and_features/genome_sequence/ (downloaded `r date()`)
+
+* genome annotation (GFF): ftp://ftp.pombase.org/pombe/genome_sequence_and_features/gff3/ (downloaded `r date()`)
+
+* genomic coordinates of rDNA and heterochromatic subtelomeric regions were determined visually in IGV using the input and H3K9me2 RNA-seq data, respectively
+
+```{bash}
+bedtools --version
+```
+
+```{bash, message=FALSE, eval=TRUE}
+source shell_variables_RNA-seq.sh
+
+mkdir -p "${genome_dir}"
+wget -N --no-verbose --directory-prefix="${genome_dir}"  ftp://ftp.pombase.org/pombe/genome_sequence_and_features/genome_sequence/Schizosaccharomyces_pombe_chromosome_I.fa.gz
+wget -N --no-verbose --directory-prefix="${genome_dir}"  ftp://ftp.pombase.org/pombe/genome_sequence_and_features/genome_sequence/Schizosaccharomyces_pombe_chromosome_II.fa.gz
+wget -N --no-verbose --directory-prefix="${genome_dir}"  ftp://ftp.pombase.org/pombe/genome_sequence_and_features/genome_sequence/Schizosaccharomyces_pombe_chromosome_III.fa.gz
+wget -N --no-verbose --directory-prefix="${genome_dir}" ftp://ftp.pombase.org/pombe/genome_sequence_and_features/genome_sequence/Schizosaccharomyces_pombe_mitochondrial_chromosome.fa.gz
+zcat `ls "${genome_dir}"* | grep fa.gz$` > "${genome}"
+
+wget -N --no-verbose --directory-prefix="${genome_dir}"  ftp://ftp.pombase.org/pombe/genome_sequence_and_features/gff3/Schizosaccharomyces_pombe_all_chromosomes.gff3.gz
+
+samtools faidx "${genome}"
+cut -f1,2 "${genome}.fai" > "${genome_dir}chrom.sizes"
+```
+
+# QC of raw sequence reads
+
+Technical quality of library construction and sequencing run was tested using fastQC
+
+```{bash}
+fastqc --version
+multiqc --version
+```
+
+```{bash, eval=TRUE}
+source shell_variables_RNA-seq.sh
+
+mkdir -p "${QC_dir}"
+ls -1 "${fastq_dir}" | grep "${fastq_file_ext}" > "${fastq_file_list}"
+fastq_files=`cat "${fastq_file_list}"`
+for i in ${fastq_files};
+do
+  fastqc --quiet --outdir "${QC_dir}" --threads "${CPU}" "${fastq_dir}${i}"
+done
+
+multiqc -f -m fastqc -i RNA-seq_histones_dbl2 -o "${QC_dir}" "${QC_dir}"
+```
+
+Results of QC:
+
+* 35 nt PE reads, reads have been already adapter-trimmed by the facility to 22-35 nt
+
+* 7.1-46M read pairs per sample
+
+* no adapter contamination detected here
+
+* 19 samples give error/warning on high read duplication levels (normal and OK for RNA-seq from a small genome)
+
+* all 24 FASTQ files give error on per base sequence content (positions 34-35 look aberrant)
+
+* 9 samples give warning on per sequence GC content (reads contain a fraction of super G-rich sequences)
+
+* 9 samples give warning on overrepresented sequences (polyG and polyN reads)
+
+* read quality scores deteriorate towards the end → 3' end trimming of reads is needed
+
+# Read trimming
+
+* remove sequence at positions 34-35
+
+* trim parts of the reads where average base quality in a 4 nt window drops below 20
+
+* only keep trimmed reads that are at least 20 nt long
+
+```{bash}
+java -jar /opt/Trimmomatic-0.39/trimmomatic-0.39.jar -version
+```
+
+```{bash, eval=TRUE}
+source shell_variables_RNA-seq.sh
+
+mkdir -p "${fastq_trim_dir}"
+fastq_files_1=( $(ls -1 "${fastq_dir}" | grep "_R1_.*${fastq_file_ext}") )
+fastq_files_2=( $(ls -1 "${fastq_dir}" | grep "_R2_.*${fastq_file_ext}") )
+for i in ${!fastq_files_1[@]};
+do
+  java -jar /opt/Trimmomatic-0.39/trimmomatic-0.39.jar PE -phred33 -threads "${CPU}" "${fastq_dir}${fastq_files_1[${i}]}" "${fastq_dir}${fastq_files_2[${i}]}" "${fastq_trim_dir}${fastq_files_1[${i}]}.trim.fastq.gz" /dev/null "${fastq_trim_dir}${fastq_files_2[${i}]}.trim.fastq.gz" /dev/null CROP:33 SLIDINGWINDOW:4:20 MINLEN:20
+done
+ls -1 "${fastq_trim_dir}" | grep "${fastq_file_ext}" > "${fastq_trim_file_list}"
+```
+
+Reads whose mate was dropped during filtering were discarded (sent to /dev/null).
+
+# QC of trimmed sequence reads
+
+Effects of trimming were determined by fastQC.
+
+```{bash, eval=TRUE}
+source shell_variables_RNA-seq.sh
+
+mkdir -p "${QC_trim_dir}"
+fastq_files=`cat "${fastq_trim_file_list}"`
+for i in ${fastq_files};
+do
+  fastqc --quiet --outdir "${QC_trim_dir}" --threads "${CPU}" "${fastq_trim_dir}${i}"
+done
+
+multiqc -f -m fastqc -i RNA-seq_histones_dbl2_trimmed -o "${QC_trim_dir}" "${QC_trim_dir}"
+```
+
+Results of QC:
+
+* dropped ~12-34% of read pairs (mostly below 20%)
+
+* 20-33 nt reads (vast majority of reads are 33 nt)
+
+* read quality scores now OK
+
+* 3 FASTQ files still give warning on per base sequence content (not sure why)
+
+# Read mapping into *S. pombe* genome
+
+```{bash}
+hisat2 --version
+samtools --version
+```
+
+```{bash, eval=TRUE}
+source shell_variables_RNA-seq.sh
+
+# build HISAT2 index
+hisat2-build --quiet -p "${CPU}" "${genome}" "${genome}"
+
+# map
+mkdir -p "${bam_dir}"
+fastq_files_1=( $(ls -1 "${fastq_trim_dir}" | grep "_R1_.*${fastq_file_ext}") )
+fastq_files_2=( $(ls -1 "${fastq_trim_dir}" | grep "_R2_.*${fastq_file_ext}") )
+for i in ${!fastq_files_1[@]};
+do
+	infile1="${fastq_trim_dir}${fastq_files_1[${i}]}"
+	infile2="${fastq_trim_dir}${fastq_files_2[${i}]}"
+	outfile="${bam_dir}${fastq_files_1[${i}]}.bam"
+  echo "${outfile}"
+	hisat2 -x "${genome}" -1 "${infile1}" -2 "${infile2}" --threads "${CPU}" --max-intronlen 10000 -k 15 --summary-file "${outfile}.log" | samtools view -b -F 256 --threads "${CPU}" - | samtools sort --threads "${CPU}" -o "${outfile}" - 
+	samtools index "${outfile}"
+	samtools view -c --threads "${CPU}" "${outfile}"
+done
+```
+
+Notes
+
+* since signal is expected at repeat regions, HISAT was set to search for up to 15 matching positions (this allows even for testing all Tf2 and dh/dg repeats in the genome), then only the best (marked as primary by HISAT) alignment was kept
+
+# QC of mapped samples
+
+WARNING - completion of this step can take A LOT of time!
+
+```{bash}
+deeptools --version
+```
+
+```{bash, eval=FALSE}
+source shell_variables_RNA-seq.sh
+
+mkdir -p "${image_dir}"
+bam_files=( $(ls -1 -d "${bam_dir}"* | grep "\.bam$") )
+multiBamSummary bins --binSize "${bin_size}" -p "${CPU}" --ignoreDuplicates -o "${bam_dir}${bam_summary_file}" --bamfiles "${bam_files[@]}"
+plotPCA -in "${bam_dir}${bam_summary_file}" -o "${image_dir}RNA-seq_plotPCA.pdf"
+plotCorrelation -in "${bam_dir}${bam_summary_file}" -o "${image_dir}RNA-seq_plotCorrelation.pdf" --corMethod pearson --whatToPlot heatmap --removeOutliers
+```
+
+# Calculate genome coverage tracks
+
+## Create genome coverage files for each sample
+
+```{bash, eval=TRUE}
+source shell_variables_RNA-seq.sh
+
+mkdir -p "${coverage_dir}"
+mapfile -t bam_files < <(ls -1 "${bam_dir}" | grep "\.bam$")
+for i in ${!bam_files[@]};
+do
+	input_file="${bam_dir}${bam_files[${i}]}"
+	bamCoverage --binSize "${bin_size}" --normalizeUsing CPM -p "${CPU}" --ignoreDuplicates --bam "${input_file}" -o "${coverage_dir}${bam_files[${i}]}.bw"
+done
+```
+
+Notes
+
+* Checked the genotypes visually in IGV → OK.
+
+* Samples nicely cluster according to IP type. Inputs cluster by biological replicate.
+
+***
+
+```{r}
+sessionInfo()
+```
