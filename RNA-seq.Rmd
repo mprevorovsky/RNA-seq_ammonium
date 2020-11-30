@@ -110,60 +110,6 @@ Results of QC:
 
 * read quality scores is good for all positions, all samples.  Trimming is not needed
 
-# Read trimming
-
-* remove sequence at positions 34-35
-
-* trim parts of the reads where average base quality in a 4 nt window drops below 20
-
-* only keep trimmed reads that are at least 20 nt long
-
-```{bash}
-java -jar /opt/Trimmomatic-0.39/trimmomatic-0.39.jar -version
-```
-
-```{bash, eval=TRUE}
-source shell_variables_RNA-seq.sh
-
-mkdir -p "${fastq_trim_dir}"
-fastq_files_1=( $(ls -1 "${fastq_dir}" | grep "_R1_.*${fastq_file_ext}") )
-fastq_files_2=( $(ls -1 "${fastq_dir}" | grep "_R2_.*${fastq_file_ext}") )
-for i in ${!fastq_files_1[@]};
-do
-  java -jar /opt/Trimmomatic-0.39/trimmomatic-0.39.jar PE -phred33 -threads "${CPU}" "${fastq_dir}${fastq_files_1[${i}]}" "${fastq_dir}${fastq_files_2[${i}]}" "${fastq_trim_dir}${fastq_files_1[${i}]}.trim.fastq.gz" /dev/null "${fastq_trim_dir}${fastq_files_2[${i}]}.trim.fastq.gz" /dev/null CROP:33 SLIDINGWINDOW:4:20 MINLEN:20
-done
-ls -1 "${fastq_trim_dir}" | grep "${fastq_file_ext}" > "${fastq_trim_file_list}"
-```
-
-Reads whose mate was dropped during filtering were discarded (sent to /dev/null).
-
-# QC of trimmed sequence reads
-
-Effects of trimming were determined by fastQC.
-
-```{bash, eval=TRUE}
-source shell_variables_RNA-seq.sh
-
-mkdir -p "${QC_trim_dir}"
-fastq_files=`cat "${fastq_trim_file_list}"`
-for i in ${fastq_files};
-do
-  fastqc --quiet --outdir "${QC_trim_dir}" --threads "${CPU}" "${fastq_trim_dir}${i}"
-done
-
-multiqc -f -m fastqc -i RNA-seq_histones_dbl2_trimmed -o "${QC_trim_dir}" "${QC_trim_dir}"
-```
-
-Results of QC:
-
-* dropped ~12-34% of read pairs (mostly below 20%)
-
-* 20-33 nt reads (vast majority of reads are 33 nt)
-
-* read quality scores now OK
-
-* 3 FASTQ files still give warning on per base sequence content (not sure why)
-
 # Read mapping into *S. pombe* genome
 
 ```{bash}
