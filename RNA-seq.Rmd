@@ -81,34 +81,34 @@ multiqc --version
 ```{bash, eval=TRUE}
 source shell_variables_RNA-seq.sh
 
-mkdir -p "${QC_dir}"
-ls -1 "${fastq_dir}" | grep "${fastq_file_ext}" > "${fastq_file_list}"
-fastq_files=`cat "${fastq_file_list}"`
-for i in ${fastq_files};
+mapfile -t fastq_files < <(ls -1 "${fastq_dir}" | grep "${fastq_file_ext}")
+
+
+for i in ${fastq_files[@]};
 do
   fastqc --quiet --outdir "${QC_dir}" --threads "${CPU}" "${fastq_dir}${i}"
 done
 
-multiqc -f -m fastqc -i RNA-seq_histones_dbl2 -o "${QC_dir}" "${QC_dir}"
+multiqc -f -m fastqc -i RNA-seq_ammonium -o "${QC_dir}" "${QC_dir}"
 ```
 
 Results of QC:
 
-* 35 nt PE reads, reads have been already adapter-trimmed by the facility to 22-35 nt
+* 51 nt PE reads
 
-* 7.1-46M read pairs per sample
+* 36-53.1M read pairs per sample
 
 * no adapter contamination detected here
 
-* 19 samples give error/warning on high read duplication levels (normal and OK for RNA-seq from a small genome)
+* all samples give error/warning on high read duplication levels (normal and OK for RNA-seq from a small genome)
 
-* all 24 FASTQ files give error on per base sequence content (positions 34-35 look aberrant)
+* all 24 FASTQ files give error on per base sequence content (positions 1-10)
 
-* 9 samples give warning on per sequence GC content (reads contain a fraction of super G-rich sequences)
+* GC content is OK for all samples
 
-* 9 samples give warning on overrepresented sequences (polyG and polyN reads)
+* one sample give warning on overrepresented sequences (polyG)
 
-* read quality scores deteriorate towards the end → 3' end trimming of reads is needed
+* read quality scores is good for all positions, all samples.  Trimming is not needed
 
 # Read trimming
 
