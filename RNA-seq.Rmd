@@ -125,12 +125,12 @@ hisat2-build --quiet -p "${CPU}" "${genome}" "${genome}"
 
 # map
 mkdir -p "${bam_dir}"
-fastq_files_1=( $(ls -1 "${fastq_trim_dir}" | grep "_R1_.*${fastq_file_ext}") )
-fastq_files_2=( $(ls -1 "${fastq_trim_dir}" | grep "_R2_.*${fastq_file_ext}") )
+fastq_files_1=( $(ls -1 "${fastq_dir}" | grep "_R1_.*${fastq_file_ext}") )
+fastq_files_2=( $(ls -1 "${fastq_dir}" | grep "_R2_.*${fastq_file_ext}") )
 for i in ${!fastq_files_1[@]};
 do
-	infile1="${fastq_trim_dir}${fastq_files_1[${i}]}"
-	infile2="${fastq_trim_dir}${fastq_files_2[${i}]}"
+	infile1="${fastq_dir}${fastq_files_1[${i}]}"
+	infile2="${fastq_dir}${fastq_files_2[${i}]}"
 	outfile="${bam_dir}${fastq_files_1[${i}]}.bam"
   echo "${outfile}"
 	hisat2 -x "${genome}" -1 "${infile1}" -2 "${infile2}" --threads "${CPU}" --max-intronlen 10000 -k 15 --summary-file "${outfile}.log" | samtools view -b -F 256 --threads "${CPU}" - | samtools sort --threads "${CPU}" -o "${outfile}" - 
