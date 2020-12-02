@@ -21,6 +21,7 @@ Variables for shell scripts are stored in the file "shell_variables_RNA-seq.sh" 
 cat shell_variables_RNA-seq.sh
 ```
 
+
 # Getting the raw RNA-seq read datasets
 
 THIS SECTION WILL ONLY BECOME RELEVANT ONCE THE SEQUENCING DATA ARE PUBLIC in ARRAYEXPRESS
@@ -40,6 +41,7 @@ do
   wget --no-verbose -O "${fastq_dir}${ftp_names[${i}]}" "${ftp_links[${i}]}"
 done
 ```
+
 
 # *Schizosaccharomyces pombe* genome sequence and annotation
 
@@ -69,6 +71,7 @@ samtools faidx "${genome}"
 cut -f1,2 "${genome}.fai" > "${genome_dir}chrom.sizes"
 ```
 
+
 # QC of raw sequence reads
 
 Technical quality of library construction and sequencing run was tested using fastQC
@@ -82,8 +85,6 @@ multiqc --version
 source shell_variables_RNA-seq.sh
 
 mapfile -t fastq_files < <(ls -1 "${fastq_dir}" | grep "${fastq_file_ext}")
-
-
 for i in ${fastq_files[@]};
 do
   fastqc --quiet --outdir "${QC_dir}" --threads "${CPU}" "${fastq_dir}${i}"
@@ -106,9 +107,10 @@ Results of QC:
 
 * GC content is OK for all samples
 
-* one sample give warning on overrepresented sequences (polyG)
+* one sample gives warning on overrepresented sequences (polyG)
 
-* read quality scores is good for all positions, all samples.  Trimming is not needed
+* read quality scores are good for all positions, all samples. Trimming is not needed
+
 
 # Read mapping into *S. pombe* genome
 
@@ -143,9 +145,10 @@ Notes
 
 * since signal is expected at repeat regions, HISAT was set to search for up to 15 matching positions (this allows even for testing all Tf2 and dh/dg repeats in the genome), then only the best (marked as primary by HISAT) alignment was kept
 
+
 # QC of mapped samples
 
-WARNING - completion of this step can take A LOT of time!
+WARNING - completion of this step can take A LOT of time (days...)!
 
 ```{bash}
 deeptools --version
@@ -160,6 +163,7 @@ multiBamSummary bins --binSize "${bin_size}" -p "${CPU}" --ignoreDuplicates -o "
 plotPCA -in "${bam_dir}${bam_summary_file}" -o "${image_dir}RNA-seq_plotPCA.pdf"
 plotCorrelation -in "${bam_dir}${bam_summary_file}" -o "${image_dir}RNA-seq_plotCorrelation.pdf" --corMethod pearson --whatToPlot heatmap --removeOutliers
 ```
+
 
 # Calculate genome coverage tracks
 

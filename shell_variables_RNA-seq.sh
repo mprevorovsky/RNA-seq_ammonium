@@ -8,12 +8,6 @@ QC_dir="./QC_RNA-seq/"
 QC_trim_dir="./QC_trim_RNA-seq/"
 # FASTQ file directory
 fastq_dir="./FASTQ_RNA-seq/"
-# quality-trimmed FASTQ file directory
-fastq_trim_dir="./FASTQ_trim_RNA-seq/"
-# file containing the list of all FASTQ files to be processed
-fastq_file_list="FASTQ_files_RNA-seq"
-# file containing the list of all quality-trimmed FASTQ files to be processed
-fastq_trim_file_list="FASTQ_trim_files_RNA-seq"
 # FASTQ file extension
 fastq_file_ext="\.fastq\.gz$"
 # genome sequence and annotation folder
