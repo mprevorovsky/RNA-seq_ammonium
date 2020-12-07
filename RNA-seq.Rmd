@@ -4,7 +4,11 @@ author: "Martin Převorovský, prevorov@natur.cuni.cz, http://www.GenoMik.cz"
 output: html_document
 ---
 
-```{r setup}
+```{r setup, message=FALSE}
+library(rtracklayer)
+library(GenomicAlignments)
+library(DESeq2)
+
 knitr::opts_chunk$set(echo = TRUE)
 
 genome_dir <- './genome/'
@@ -13,6 +17,8 @@ coverage_dir <- './coverage_RNA-seq/'
 QC_dir <- './QC_RNA-seq/'
 QC_trim_dir <- './QC_trim_RNA-seq/'
 image_dir <- './images/'
+deg_dir <- './DEG_RNA-seq/'
+genome_gff <- paste0(genome_dir, 'Schizosaccharomyces_pombe_all_chromosomes.gff3')
 ```
 
 Variables for shell scripts are stored in the file "shell_variables_RNA-seq.sh" and can be modified as needed:
@@ -66,6 +72,7 @@ wget -N --no-verbose --directory-prefix="${genome_dir}" ftp://ftp.pombase.org/po
 zcat `ls "${genome_dir}"* | grep fa.gz$` > "${genome}"
 
 wget -N --no-verbose --directory-prefix="${genome_dir}"  ftp://ftp.pombase.org/pombe/genome_sequence_and_features/gff3/Schizosaccharomyces_pombe_all_chromosomes.gff3.gz
+gzip -fd "${genome_dir}Schizosaccharomyces_pombe_all_chromosomes.gff3.gz"
 
 samtools faidx "${genome}"
 cut -f1,2 "${genome}.fai" > "${genome_dir}chrom.sizes"
@@ -164,10 +171,10 @@ plotPCA -in "${bam_dir}${bam_summary_file}" -o "${image_dir}RNA-seq_plotPCA.pdf"
 plotCorrelation -in "${bam_dir}${bam_summary_file}" -o "${image_dir}RNA-seq_plotCorrelation.pdf" --corMethod pearson --whatToPlot heatmap --removeOutliers
 ```
 
+* Samples nicely cluster according to IP type. Inputs cluster by biological replicate.
+
 
 # Calculate genome coverage tracks
-
-## Create genome coverage files for each sample
 
 ```{bash, eval=TRUE}
 source shell_variables_RNA-seq.sh
@@ -179,16 +186,147 @@ do
 	input_file="${bam_dir}${bam_files[${i}]}"
 	bamCoverage --binSize "${bin_size}" --normalizeUsing CPM -p "${CPU}" --ignoreDuplicates --bam "${input_file}" -o "${coverage_dir}${bam_files[${i}]}.bw"
 done
+
+# average coverage tracks across biological replicates
+mapfile -t bw_files < <(ls -1 "${coverage_dir}" | grep "\.bam\.bw$")
+samples=("WT_YES" "WT_YES+AMM" "cbf11_YES" "cbf11_YES+AMM")
+for i in {0..3};
+do
+  wiggletools mean "${coverage_dir}${bw_files[${i}]}" "${coverage_dir}${bw_files[${i}+4]}" "${coverage_dir}${bw_files[${i}+8]}" | wigToBigWig -itemsPerSlot="${bin_size}" stdin "${genome_dir}chrom.sizes" "${coverage_dir}${samples[${i}]}.mean.bw"
+done
 ```
 
 Notes
 
 * Checked the genotypes visually in IGV → OK.
 
-* Samples nicely cluster according to IP type. Inputs cluster by biological replicate.
+
+# Identify differentially expressed genes
+
+## Generate gene-level counts tables.
+
+* Raw count data are needed for DEG calling in `DESeq2`.
+
+* TPM-normalized (Transcripts Per Million) count data are suitable for general comparisons of the samples.
+
+```{r, eval=TRUE}
+gff <- import.gff3(genome_gff)
+gff.genes <- gff[gff$type == 'gene', ]
+bam_files <- list.files(bam_dir, full.names = TRUE, pattern = '\\.bam$')
+bam <- BamFileList(bam_files, yieldSize = 1000000)
+
+sample_info <- read.delim('sampleInfo', stringsAsFactors = FALSE, header = TRUE, sep = '\t')
+sample_info[, 'cultivation_run'] <- factor(sample_info[, 'cultivation_run'])
+sample_info[, 'genotype'] <- factor(sample_info[, 'genotype'])
+sample_info[, 'medium'] <- factor(sample_info[, 'medium'])
+names(bam) <- sample_info$sample_ID
+
+se <- summarizeOverlaps(gff.genes,
+                        bam,
+                        mode = 'Union',
+                        singleEnd = FALSE,
+                        ignore.strand = FALSE,
+                        fragments = FALSE,
+                        preprocess.reads = invertStrand)
+rownames(se) <- gff.genes$ID
+colData(se) <- cbind(colData(se), sample_info)
+#save(se, file = 'se.rda')
+#load(file = 'se.rda')
+
+counts <- assay(se)
+
+# normalize to get TPM values (transcripts per million)
+gene_widths <- width(gff.genes)
+counts.norm <- counts
+for (i in 1:nrow(counts.norm)){
+  counts.norm[i, ] <- counts.norm[i, ] / gene_widths[i]
+}
+count_sums <- colSums(counts.norm) / 1000000
+for (i in 1:length(count_sums)){
+  counts.norm[, i] <- counts.norm[, i] / count_sums[i]
+}
+
+counts <- cbind(gff.genes$Name, counts)
+counts.norm <- cbind(gff.genes$Name, counts.norm)
+colnames(counts)[1] <- 'gene_name'
+colnames(counts.norm)[1] <- 'gene_name'
+write.csv(counts, file = paste0(coverage_dir, 'counts.csv'), quote = FALSE)
+write.csv(counts.norm, file = paste0(coverage_dir, 'counts.TPM-normalized.csv'), quote = FALSE)
+rm(gene_widths, count_sums)
+```
+
+## DEG calling
+
+```{r, eval=TRUE}
+# Benjamini-Hochberg p value adjustment (FDR)
+padj_threshold <- 0.05
+
+dir.create(deg_dir)
+
+# cbf11-YES vs WT-YES
+dds <- DESeqDataSet(se, design = ~ cultivation_run + genotype)
+dds <- dds[, dds$medium =='YES'] # remove YES+ammonium samples ('YES_AMM')
+dds$medium <- droplevels(dds$medium) # remove factor levels without samples
+dds$genotype <- relevel(dds$genotype, ref = 'WT') # change order of factor levels to get cbf11/WT fold change (= define the reference)
+dds <- DESeq(dds)
+res <- results(dds, alpha = padj_threshold)
+summary(res[res$padj <= padj_threshold & !is.na(res$padj), ])
+res <- cbind(counts[, 'gene_name'], res)
+colnames(res)[1] <- 'gene_name'
+write.csv(res, file = paste0(deg_dir, 'DESeq2results_cbf11-YES_vs_WT-YES.csv'), quote = FALSE)
+res.sig <- res[which(res$padj <= padj_threshold), ]
+res.sig <- res.sig[order(res.sig$log2FoldChange), ]
+write.csv(res.sig, file = paste0(deg_dir, 'DESeq2results_cbf11-YES_vs_WT-YES.SIG.csv'), quote = FALSE)
+
+# cbf11-YES+AMM vs WT-YES+AMM
+dds <- DESeqDataSet(se, design = ~ cultivation_run + genotype)
+dds <- dds[, dds$medium =='YES_AMM']
+dds$medium <- droplevels(dds$medium)
+dds$genotype <- relevel(dds$genotype, ref = 'WT')
+dds <- DESeq(dds)
+res <- results(dds, alpha = padj_threshold)
+summary(res[res$padj <= padj_threshold & !is.na(res$padj), ])
+res <- cbind(counts[, 'gene_name'], res)
+colnames(res)[1] <- 'gene_name'
+write.csv(res, file = paste0(deg_dir, 'DESeq2results_cbf11-YES+AMM_vs_WT-YES+AMM.csv'), quote = FALSE)
+res.sig <- res[which(res$padj <= padj_threshold), ]
+res.sig <- res.sig[order(res.sig$log2FoldChange), ]
+write.csv(res.sig, file = paste0(deg_dir, 'DESeq2results_cbf11-YES+AMM_vs_WT-YES+AMM.SIG.csv'), quote = FALSE)
+
+# WT-YES+AMM vs WT-YES
+dds <- DESeqDataSet(se, design = ~ cultivation_run + medium)
+dds <- dds[, dds$genotype =='WT']
+dds$genotype <- droplevels(dds$genotype)
+dds$medium <- relevel(dds$medium, ref = 'YES')
+dds <- DESeq(dds)
+res <- results(dds, alpha = padj_threshold)
+summary(res[res$padj <= padj_threshold & !is.na(res$padj), ])
+res <- cbind(counts[, 'gene_name'], res)
+colnames(res)[1] <- 'gene_name'
+write.csv(res, file = paste0(deg_dir, 'DESeq2results_WT-YES+AMM_vs_WT-YES.csv'), quote = FALSE)
+res.sig <- res[which(res$padj <= padj_threshold), ]
+res.sig <- res.sig[order(res.sig$log2FoldChange), ]
+write.csv(res.sig, file = paste0(deg_dir, 'DESeq2results_WT-YES+AMM_vs_WT-YES.SIG.csv'), quote = FALSE)
+
+# cbf11-YES+AMM vs cbf11-YES
+dds <- DESeqDataSet(se, design = ~ cultivation_run + medium)
+dds <- dds[, dds$genotype =='cbf11']
+dds$genotype <- droplevels(dds$genotype)
+dds$medium <- relevel(dds$medium, ref = 'YES')
+dds <- DESeq(dds)
+res <- results(dds, alpha = padj_threshold)
+summary(res[res$padj <= padj_threshold & !is.na(res$padj), ])
+res <- cbind(counts[, 'gene_name'], res)
+colnames(res)[1] <- 'gene_name'
+write.csv(res, file = paste0(deg_dir, 'DESeq2results_cbf11-YES+AMM_vs_cbf11-YES.csv'), quote = FALSE)
+res.sig <- res[which(res$padj <= padj_threshold), ]
+res.sig <- res.sig[order(res.sig$log2FoldChange), ]
+write.csv(res.sig, file = paste0(deg_dir, 'DESeq2results_cbf11-YES+AMM_vs_cbf11-YES.SIG.csv'), quote = FALSE)
+```
 
 ***
 
 ```{r}
 sessionInfo()
 ```
+
