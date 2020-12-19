@@ -55,8 +55,6 @@ done
 
 * genome annotation (GFF): ftp://ftp.pombase.org/pombe/genome_sequence_and_features/gff3/ (downloaded `r date()`)
 
-* genomic coordinates of rDNA and heterochromatic subtelomeric regions were determined visually in IGV using the input and H3K9me2 RNA-seq data, respectively
-
 ```{bash}
 bedtools --version
 ```
@@ -91,6 +89,7 @@ multiqc --version
 ```{bash, eval=TRUE}
 source shell_variables_RNA-seq.sh
 
+mkdir -p "${QC_dir}"
 mapfile -t fastq_files < <(ls -1 "${fastq_dir}" | grep "${fastq_file_ext}")
 for i in ${fastq_files[@]};
 do
@@ -171,7 +170,7 @@ plotPCA -in "${bam_dir}${bam_summary_file}" -o "${image_dir}RNA-seq_plotPCA.pdf"
 plotCorrelation -in "${bam_dir}${bam_summary_file}" -o "${image_dir}RNA-seq_plotCorrelation.pdf" --corMethod pearson --whatToPlot heatmap --removeOutliers
 ```
 
-* Samples nicely cluster according to IP type. Inputs cluster by biological replicate.
+* Samples cluster very well by genotype; there are some batch effects affecting clustering according to growth media type in WT.
 
 
 # Calculate genome coverage tracks
@@ -329,4 +328,3 @@ write.csv(res.sig, file = paste0(deg_dir, 'DESeq2results_cbf11-YES+AMM_vs_cbf11-
 ```{r}
 sessionInfo()
 ```
-
