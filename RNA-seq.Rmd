@@ -15,7 +15,7 @@ genome_dir <- './genome/'
 bam_dir <- './BAM_RNA-seq/'
 coverage_dir <- './coverage_RNA-seq/'
 QC_dir <- './QC_RNA-seq/'
-QC_trim_dir <- './QC_trim_RNA-seq/'
+#QC_trim_dir <- './QC_trim_RNA-seq/'
 image_dir <- './images/'
 deg_dir <- './DEG_RNA-seq/'
 genome_gff <- paste0(genome_dir, 'Schizosaccharomyces_pombe_all_chromosomes.gff3')
@@ -191,7 +191,7 @@ mapfile -t bw_files < <(ls -1 "${coverage_dir}" | grep "\.bam\.bw$")
 samples=("WT_YES" "WT_YES+AMM" "cbf11_YES" "cbf11_YES+AMM")
 for i in {0..3};
 do
-  wiggletools mean "${coverage_dir}${bw_files[${i}]}" "${coverage_dir}${bw_files[${i}+4]}" "${coverage_dir}${bw_files[${i}+8]}" | wigToBigWig -itemsPerSlot="${bin_size}" stdin "${genome_dir}chrom.sizes" "${coverage_dir}${samples[${i}]}.mean.bw"
+  wiggletools mean "${coverage_dir}${bw_files[${i}]}" "${coverage_dir}${bw_files[${i}+4]}" "${coverage_dir}${bw_files[${i}+8]}" | wigToBigWig stdin "${genome_dir}chrom.sizes" "${coverage_dir}${samples[${i}]}.mean.bw"
 done
 ```
 
